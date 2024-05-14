@@ -206,5 +206,24 @@ app.use("/api/lava-ya/", asistenciaRoutes);
 // Personal
 app.use("/api/lava-ya/", personalRoutes);
 
-server.listen(PORT);
-console.log("Server Iniciado en puerto: " + PORT);
+server.listen(PORT, () => {
+  console.log("Server Iniciado en puerto: " + PORT);
+});
+
+app.get("/", (req, res) => {
+  // Aquí puedes definir el HTML que quieres enviar como respuesta
+  const htmlResponse = `
+    <html>
+      <head>
+        <title>Estado del Servidor</title>
+      </head>
+      <body>
+        <h1>Estado del Servidor</h1>
+        <p>El servidor está funcionando correctamente.</p>
+      </body>
+    </html>
+  `;
+
+  // Envía el HTML como respuesta
+  res.send(htmlResponse);
+});
