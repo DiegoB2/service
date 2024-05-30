@@ -93,7 +93,9 @@ router.post("/add-factura", openingHours, async (req, res) => {
     } = infoOrden;
 
     // Consultar el último registro ordenado por el campo 'index' de forma descendente
-    const ultimoRegistro = await Factura.findOne().sort({ index: -1 }).lean();
+    const ultimoRegistro = await Factura.findOne({}, { index: 1, _id: 0 })
+      .sort({ index: -1 })
+      .lean();
 
     // Obtener el último índice utilizado o establecer 0 si no hay registros
     const ultimoIndice = ultimoRegistro ? ultimoRegistro.index : 0;
@@ -122,6 +124,7 @@ router.post("/add-factura", openingHours, async (req, res) => {
       Modalidad,
       Nombre,
       Items,
+      stateLavado: "inProgress",
       celular,
       direccion,
       datePrevista,
@@ -357,50 +360,33 @@ router.get("/get-factura/date/:startDate/:endDate", async (req, res) => {
       },
     }).lean();
 
-    // Obtener todos los registros de donaciones relevantes
-    const donacionRegistros = await Donacion.find({
-      "donationDate.fecha": {
-        $gte: startDate,
-        $lte: endDate,
-      },
-    }).lean();
+    // Obtener todos los IDs de pagos y donaciones relevantes
+    const idsPagos = ordenes.flatMap((orden) => orden.listPago);
+    const idsDonaciones = ordenes.map((orden) => orden._id);
 
-    // Procesar cada orden de factura de manera asincrónica
-    const resultados = await Promise.all(
-      ordenes.map(async (orden) => {
-        // Obtener todos los pagos relevantes para la factura actual
-        const pagos = await Pagos.find({
-          _id: { $in: orden.listPago },
-        }).lean();
+    // Consultar todos los pagos y donaciones relevantes
+    const [pagos, donaciones] = await Promise.all([
+      Pagos.find({ _id: { $in: idsPagos } }).lean(),
+      Donacion.find({ serviceOrder: { $in: idsDonaciones } }).lean(),
+    ]);
 
-        // Mapear los pagos relevantes al formato deseado
-        const ListPago = pagos.map((pago) => ({
-          _id: pago._id,
-          idUser: pago.idUser,
-          idOrden: orden._id,
-          orden: orden.codRecibo,
-          ordenDateCreation: orden.dateCreation.fecha,
-          date: pago.date,
-          isCounted: pago.isCounted,
-          nombre: orden.Nombre,
-          total: pago.total,
-          metodoPago: pago.metodoPago,
-          Modalidad: pago.Modalidad,
-        }));
+    // Crear un mapa de pagos por ID de orden para un acceso más rápido
+    const pagosPorOrden = pagos.reduce((acc, pago) => {
+      if (!acc[pago.idOrden]) {
+        acc[pago.idOrden] = [];
+      }
+      acc[pago.idOrden].push(pago);
+      return acc;
+    }, {});
 
-        // Buscar la fecha de donación correspondiente
-        const donationDate = donacionRegistros.find((donado) => {
-          return donado.serviceOrder.includes(orden._id.toString());
-        })?.donationDate || { fecha: "", hora: "" };
-
-        // Devolver la orden de factura con los datos procesados
-        return {
-          ...orden,
-          ListPago,
-          donationDate,
-        };
-      })
-    );
+    // Procesar cada orden de factura
+    const resultados = ordenes.map((orden) => ({
+      ...orden,
+      ListPago: pagosPorOrden[orden._id] || [],
+      donationDate: donaciones.find((donado) =>
+        donado.serviceOrder.includes(orden._id.toString())
+      )?.donationDate || { fecha: "", hora: "" },
+    }));
 
     res.status(200).json(resultados);
   } catch (error) {
@@ -408,7 +394,6 @@ router.get("/get-factura/date/:startDate/:endDate", async (req, res) => {
     res.status(500).json({ mensaje: "Error interno del servidor" });
   }
 });
-
 const generateDateArray = (type, filter) => {
   let fechas = [];
 
@@ -921,6 +906,34 @@ router.post("/cancel-entrega/:idOrden", async (req, res) => {
     await session.abortTransaction();
     console.error(error);
     res.status(500).json({ mensaje: "Error al cancelar Entrega" });
+  }
+});
+
+router.post("/change-state-lavado/:idOrden/:newState", async (req, res) => {
+  const { idOrden, newState } = req.params;
+
+  if (newState !== "inProgress" && newState !== "ready") {
+    return res.status(400).send({ message: "Estado inválido" });
+  }
+
+  try {
+    // Actualiza el estado de lavado directamente en la base de datos
+    const updatedFactura = await Factura.findByIdAndUpdate(
+      idOrden,
+      { stateLavado: newState },
+      { new: true }
+    );
+
+    if (!updatedFactura) {
+      return res.status(404).send({ message: "Factura no encontrada" });
+    }
+
+    res.status(200).send(updatedFactura);
+  } catch (error) {
+    console.error(error);
+    res
+      .status(500)
+      .send({ message: "Error al actualizar el estado de lavado", error });
   }
 });
 

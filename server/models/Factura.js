@@ -24,6 +24,7 @@ const facturaSchema = new mongoose.Schema({
       total: String,
     },
   ],
+  stateLavado: String,
   celular: String,
   direccion: String,
   datePrevista: {},
