@@ -904,4 +904,32 @@ router.post("/cancel-entrega/:idOrden", async (req, res) => {
   }
 });
 
+router.post("/change-state-lavado/:idOrden/:newState", async (req, res) => {
+  const { idOrden, newState } = req.params;
+
+  if (newState !== "inProgress" && newState !== "ready") {
+    return res.status(400).send({ message: "Estado inválido" });
+  }
+
+  try {
+    // Actualiza el estado de lavado directamente en la base de datos
+    const updatedFactura = await Factura.findByIdAndUpdate(
+      idOrden,
+      { stateLavado: newState },
+      { new: true }
+    );
+
+    if (!updatedFactura) {
+      return res.status(404).send({ message: "Factura no encontrada" });
+    }
+
+    res.status(200).send(updatedFactura);
+  } catch (error) {
+    console.error(error);
+    res
+      .status(500)
+      .send({ message: "Error al actualizar el estado de lavado", error });
+  }
+});
+
 export default router;
