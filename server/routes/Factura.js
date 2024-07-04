@@ -826,6 +826,7 @@ router.put("/update-factura/entregar/:id", async (req, res) => {
       facturaId,
       {
         $set: {
+          stateLavado: "ready",
           estadoPrenda: "entregado",
           location: 1,
           dateEntrega: {
@@ -842,6 +843,7 @@ router.put("/update-factura/entregar/:id", async (req, res) => {
           codRecibo: 1,
           dateEntrega: 1,
           totalNeto: 1,
+          stateLavado: 1,
           estadoPrenda: 1,
           location: 1,
           dateRecepcion: 1,
