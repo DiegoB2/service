@@ -351,41 +351,77 @@ router.get("/get-factura/:id", (req, res) => {
     });
 });
 
-router.get("/get-factura/date/:startDate/:endDate", async (req, res) => {
+// Función para buscar facturas y procesar resultados
+const handleGetInfoDetallada = async (ordenes) => {
+  // Obtener todos los IDs de pagos y donaciones relevantes
+  const idsPagos = ordenes.flatMap((orden) => orden.listPago);
+  const idsDonaciones = ordenes
+    .filter((orden) => orden.location === 3)
+    .map((orden) => orden._id);
+
+  // Consultar todos los pagos y donaciones relevantes
+  const [pagos, donaciones] = await Promise.all([
+    Pagos.find({ _id: { $in: idsPagos } }).lean(),
+    Donacion.find({ serviceOrder: { $in: idsDonaciones } }).lean(),
+  ]);
+
+  // Crear un mapa de pagos por ID de orden para un acceso más rápido
+  const pagosPorOrden = mapArrayByKey(pagos, "idOrden");
+
+  // Procesar cada orden de factura
+  const resultados = ordenes.map((orden) => ({
+    ...orden,
+    ListPago: pagosPorOrden[orden._id] || [],
+    donationDate: donaciones.find((donado) =>
+      donado.serviceOrder.includes(orden._id.toString())
+    )?.donationDate || { fecha: "", hora: "" },
+  }));
+
+  return resultados;
+};
+
+router.get("/get-factura/date-range/:startDate/:endDate", async (req, res) => {
   const { startDate, endDate } = req.params;
 
   try {
     // Buscar todas las facturas dentro del rango de fechas
     const ordenes = await Factura.find({
-      "dateRecepcion.fecha": {
+      $or: [
+        { "dateCreation.fecha": { $gte: startDate, $lte: endDate } },
+        { estadoPrenda: "pendiente" },
+      ],
+    }).lean();
+
+    const infoFormateada = await handleGetInfoDetallada(ordenes);
+    res.status(200).json(infoFormateada);
+  } catch (error) {
+    console.error("Error al obtener datos: ", error);
+    res.status(500).json({ mensaje: "Error interno del servidor" });
+  }
+});
+
+router.get("/get-factura/date/:date", async (req, res) => {
+  const { date } = req.params;
+
+  // Obtener el primer y último día del mes de la fecha proporcionada
+  const startDate = moment(date, "YYYY-MM-DD")
+    .startOf("month")
+    .format("YYYY-MM-DD");
+  const endDate = moment(startDate, "YYYY-MM-DD")
+    .endOf("month")
+    .format("YYYY-MM-DD");
+
+  try {
+    // Buscar todas las facturas que coincidan exactamente con la fecha
+    const ordenes = await Factura.find({
+      "dateCreation.fecha": {
         $gte: startDate,
         $lte: endDate,
       },
     }).lean();
 
-    // Obtener todos los IDs de pagos y donaciones relevantes
-    const idsPagos = ordenes.flatMap((orden) => orden.listPago);
-    const idsDonaciones = ordenes.map((orden) => orden._id);
-
-    // Consultar todos los pagos y donaciones relevantes
-    const [pagos, donaciones] = await Promise.all([
-      Pagos.find({ _id: { $in: idsPagos } }).lean(),
-      Donacion.find({ serviceOrder: { $in: idsDonaciones } }).lean(),
-    ]);
-
-    // Crear un mapa de pagos por ID de orden para un acceso más rápido
-    const pagosPorOrden = mapArrayByKey(pagos, "idOrden");
-
-    // Procesar cada orden de factura
-    const resultados = ordenes.map((orden) => ({
-      ...orden,
-      ListPago: pagosPorOrden[orden._id] || [],
-      donationDate: donaciones.find((donado) =>
-        donado.serviceOrder.includes(orden._id.toString())
-      )?.donationDate || { fecha: "", hora: "" },
-    }));
-
-    res.status(200).json(resultados);
+    const infoFormateada = await handleGetInfoDetallada(ordenes);
+    res.status(200).json(infoFormateada);
   } catch (error) {
     console.error("Error al obtener datos: ", error);
     res.status(500).json({ mensaje: "Error interno del servidor" });
@@ -897,6 +933,7 @@ router.put("/update-factura/entregar/:id", async (req, res) => {
         estadoPrenda: orderUpdated.estadoPrenda,
         location: orderUpdated.location,
         dateEntrega: orderUpdated.dateEntrega,
+        stateLavado: orderUpdated.stateLavado,
       },
       ...(newGasto && { newGasto }),
       ...(infoCliente && { changeCliente: infoCliente }),
@@ -1021,12 +1058,14 @@ router.put("/update-factura/anular/:id", async (req, res) => {
       facturaId,
       {
         estadoPrenda: "anulado",
+        stateLavado: "cancelled",
       },
       {
         new: true,
         session: session,
         fields: {
           estadoPrenda: 1,
+          stateLavado: 1,
           idCliente: 1,
           cargosExtras: 1,
           modoDescuento: 1,
@@ -1081,6 +1120,7 @@ router.put("/update-factura/anular/:id", async (req, res) => {
       orderAnulado: {
         _id: orderUpdated._id,
         estadoPrenda: orderUpdated.estadoPrenda,
+        stateLavado: orderUpdated.stateLavado,
       },
       ...(infoCliente && { changeCliente: infoCliente }),
     });
